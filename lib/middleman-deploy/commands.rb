@@ -3,6 +3,8 @@ require "middleman-core/cli"
 require "middleman-deploy/extension"
 require "middleman-deploy/pkg-info"
 
+require "digest"
+require "fileutils"
 require "git"
 
 PACKAGE = "#{Middleman::Deploy::PACKAGE}"
@@ -121,33 +123,38 @@ EOF
       end
 
       def deploy_git
-        remote = self.deploy_options.remote
-        branch = self.deploy_options.branch
+        remote_name = self.deploy_options.remote
+        branch_name = self.deploy_options.branch
 
-        puts "## Deploying via git to remote=\"#{remote}\" and branch=\"#{branch}\""
+        puts "## Deploying via git to remote=\"#{remote_name}\" and branch=\"#{branch_name}\""
 
-        # ensure that the remote branch exists in ENV["MM_ROOT"]
-        orig = Git.open(ENV["MM_ROOT"])
-        # TODO: orig.branch(branch, "#{remote}/#{branch}")
+        local_repo = Git.open(ENV["MM_ROOT"])
+        remote_url = local_repo.remote(remote_name).url
 
-        Dir.mktmpdir do |tmp|
-          # clone ENV["MM_ROOT"] to tmp (ENV["MM_ROOT"] is now "origin")
-          repo = Git.clone(ENV["MM_ROOT"], tmp)
-          repo.checkout("origin/#{branch}", :new_branch => branch)
+        cachedir = File.join(Dir.home, ".middleman-deploy", Digest::SHA1.hexdigest(remote_url + branch_name))
+        FileUtils.mkdir_p cachedir, :mode => 0700
 
-          # copy ./build/* to tmp
-          FileUtils.cp_r(Dir.glob(File.join(ENV["MM_ROOT"], "build", "*")), tmp)
-
-          # git add and commit in tmp
-          repo.add
-          repo.commit("Automated commit at #{Time.now.utc} by #{PACKAGE} #{VERSION}")
-
-          # push back into ENV["MM_ROOT"]
-          repo.push("origin", branch)
+        if !File.directory? File.join(cachedir, ".git")
+          repo = Git.clone(remote_url, cachedir)
+          if repo.current_branch != branch_name
+            repo.checkout("origin/#{branch_name}", :new_branch => branch_name)
+          end
+        else
+          repo = Git.open(cachedir)
+          repo.pull
         end
 
-        orig.push(remote, branch)
-        orig.remote(remote).fetch
+        # TODO: First we should delete everything except for '.git' from cachedir.
+        FileUtils.cp_r(Dir.glob(File.join(ENV["MM_ROOT"], "build", "*")), cachedir)
+
+        repo.add
+        repo.commit("Automated commit at #{Time.now.utc} by #{PACKAGE} #{VERSION}")
+
+        repo.push("origin", branch_name)
+
+        puts "== A cache of the remote \"#{remote_name}\" is in:"
+        puts "==   #{cachedir}"
+        puts "== You may delete it now or leave it alone to speed-up your next deployment."
       end
 
       def deploy_ftp
