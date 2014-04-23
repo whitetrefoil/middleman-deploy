@@ -1,5 +1,4 @@
 require 'net/ftp'
-require 'ptools'
 
 module Middleman
   module Deploy
@@ -49,11 +48,7 @@ module Middleman
           err_code  = reply[0,3].to_i
 
           if err_code == 550
-            if File.binary?(filename)
-              ftp.putbinaryfile(filename, filename)
-            else
-              ftp.puttextfile(filename, filename)
-            end
+            ftp.puttextfile(filename, filename)
           end
         end
 
